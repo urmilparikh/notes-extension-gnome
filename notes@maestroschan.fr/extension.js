@@ -10,7 +10,6 @@ const Mainloop = imports.mainloop;
 
 const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
-const Convenience = Me.imports.convenience;
 
 const NoteBox = Me.imports.noteBox;
 
@@ -24,11 +23,11 @@ const PATH = GLib.build_pathv('/', [GLib.get_user_data_dir(), 'notes@maestroscha
 
 var NOTES_MANAGER;
 var SETTINGS;
-var Z_POSITION;
+var LAYER_SETTING;
 var AUTO_FOCUS;
 
 function init() {
-	Convenience.initTranslations();
+	ExtensionUtils.initTranslations();
 	try {
 		let a = Gio.file_new_for_path(PATH);
 		if (!a.query_exists(null)) {
@@ -37,11 +36,11 @@ function init() {
 	} catch (e) {
 		log(e.message);
 	}
-	Z_POSITION = '';
+	LAYER_SETTING = '';
 }
 
 function enable() {
-	SETTINGS = Convenience.getSettings();
+	SETTINGS = ExtensionUtils.getSettings();
 	AUTO_FOCUS = SETTINGS.get_boolean('auto-focus'); // XXX crado
 
 	NOTES_MANAGER = new NotesManager();
@@ -49,6 +48,14 @@ function enable() {
 
 function disable() {
 	NOTES_MANAGER.destroy();
+
+	if (NOTES_MANAGER) {
+		NOTES_MANAGER = null;
+	}
+
+	if (SETTINGS) {
+		SETTINGS = null;
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -72,7 +79,7 @@ class NotesManager {
 		this.panel_button.add_child(icon);
 		this.panel_button.connect(
 			'button-press-event',
-			this._toggleState.bind(this)
+			this._onButtonPressed.bind(this)
 		);
 		this._updateIconVisibility();
 		// `0` is the position within the chosen box (here, the `right` one)
@@ -81,27 +88,27 @@ class NotesManager {
 		// Initialisation of the notes themselves
 		this._allNotes = new Array();
 		this._notesAreVisible = false;
-		this._updateLayoutSetting(); // it inits Z_POSITION
+		this._updateLayerSetting(); // it inits LAYER_SETTING
 
 		this._notesLoaded = false; // this will tell the toggleState method that
-		// notes need to be loaded first, thus doing the actual initilisation
+		// notes need to be loaded first, thus doing the actual initialisation
 
 		// Initialisation of the signals connections
-		this._bindShortcut();
+		this._bindKeyboardShortcut();
 		this._connectAllSignals();
 	}
 
-	_bindShortcut () {
-		this.USE_SHORTCUT = Convenience.getSettings().get_boolean('use-shortcut');
-		if (!this.USE_SHORTCUT) { return; }
-
-		Main.wm.addKeybinding(
-			'notes-kb-shortcut',
-			Convenience.getSettings(),
-			Meta.KeyBindingFlags.NONE,
-			Shell.ActionMode.ALL,
-			this._toggleState.bind(this)
-		);
+	_bindKeyboardShortcut () {
+		this._useKeyboardShortcut = SETTINGS.get_boolean('use-shortcut');
+		if (this._useKeyboardShortcut) {
+			Main.wm.addKeybinding(
+				'notes-kb-shortcut',
+				SETTINGS,
+				Meta.KeyBindingFlags.NONE,
+				Shell.ActionMode.ALL,
+				this._onButtonPressed.bind(this)
+			);
+		}
 	}
 
 	_loadAllNotes () {
@@ -144,7 +151,7 @@ class NotesManager {
 		if (deletedNoteId < this._allNotes.length) {
 			this._allNotes[deletedNoteId] = lastNote;
 			lastNote.id = deletedNoteId;
-			this._allNotes[deletedNoteId].onlySave(true);
+			this._allNotes[deletedNoteId].onlySave();
 		}
 		this._deleteNoteFiles(this._allNotes.length);
 	}
@@ -165,23 +172,11 @@ class NotesManager {
 		return areaIsFree;
 	}
 
-	//--------------------------------------------------------------------------
-
-	_toggleState () {
-		if(!this._notesLoaded) {
-			this._loadAllNotes();
-		}
-
-		// log('_toggleState');
-		if(this._allNotes.length == 0) {
-			this.createNote('', 16);
-			this._showNotes();
-		} else if (this._notesAreVisible) {
-			this._hideNotes();
-		} else {
-			this._showNotes();
-		}
+	notesNeedChromeTracking () {
+		return this._layerId == 'above-all';
 	}
+
+	//--------------------------------------------------------------------------
 
 	_showNotes () {
 		this._notesAreVisible = true;
@@ -192,13 +187,14 @@ class NotesManager {
 
 	_hideNotes () {
 		this._onlyHideNotes();
-		let timeout_id = Mainloop.timeout_add(10, () => {
+		this._timeout_id = Mainloop.timeout_add(10, () => {
+			this._timeout_id = null;
 			// saving to the disk is slightly delayed to give the illusion that
 			// the extension doesn't freeze the system
 			this._allNotes.forEach(function (n) {
 				n.onlySave(false);
 			});
-			Mainloop.source_remove(timeout_id);
+			return GLib.SOURCE_REMOVE;
 		});
 	}
 
@@ -217,6 +213,48 @@ class NotesManager {
 		statefile.delete(null); // may not do anything
 	}
 
+	_onButtonPressed () {
+		if(!this._notesLoaded) {
+			this._loadAllNotes();
+		}
+		// log('_onButtonPressed');
+
+		let preventReshowing = false;
+		if(LAYER_SETTING === 'cycle-layers') {
+			this._allNotes.forEach(function (n) {
+				n.removeFromCorrectLayer();
+			});
+
+			// the notes' visibility will be inverted later
+			if(!this._notesAreVisible) {
+				this._layerId = 'on-background';
+				this._notesAreVisible = false;
+			} else if(this._layerId === 'on-background') {
+				this._layerId = 'above-all';
+				this._notesAreVisible = false;
+				preventReshowing = true;
+			} else if(this._layerId === 'above-all') {
+				this._layerId = 'above-all';
+				this._notesAreVisible = true;
+			}
+
+			this._allNotes.forEach(function (n) {
+				n.loadIntoCorrectLayer();
+			});
+		}
+
+		if(this._allNotes.length == 0) {
+			this.createNote('', 16);
+			this._showNotes();
+		} else if (this._notesAreVisible) {
+			this._hideNotes();
+		} else if (preventReshowing) {
+			this._notesAreVisible = true;
+		} else {
+			this._showNotes();
+		}
+	}
+
 	//--------------------------------------------------------------------------
 	// Watch the gsettings values and update the extension if they change ------
 
@@ -225,7 +263,7 @@ class NotesManager {
 
 		this._settingsSignals['layout'] = SETTINGS.connect(
 			'changed::layout-position',
-			this._updateLayoutSetting.bind(this)
+			this._updateLayerSetting.bind(this)
 		);
 		this._settingsSignals['bring-back'] = SETTINGS.connect(
 			'changed::ugly-hack',
@@ -250,10 +288,10 @@ class NotesManager {
 	}
 
 	_updateShortcut () {
-		if(this.USE_SHORTCUT) {
+		if(this._useKeyboardShortcut) {
 			Main.wm.removeKeybinding('notes-kb-shortcut');
 		}
-		this._bindShortcut();
+		this._bindKeyboardShortcut();
 	}
 
 	_updateFocusSetting () {
@@ -265,7 +303,7 @@ class NotesManager {
 	}
 
 	_updateIconVisibility () {
-		let now_visible = !Convenience.getSettings().get_boolean('hide-icon');
+		let now_visible = !SETTINGS.get_boolean('hide-icon');
 		this.panel_button.visible = now_visible;
 	}
 
@@ -280,12 +318,16 @@ class NotesManager {
 	 * is actually set by the user. Possible values for the layers can be
 	 * 'above-all', 'on-background' or 'cycle-layers'.
 	 */
-	_updateLayoutSetting () {
+	_updateLayerSetting () {
 		this._allNotes.forEach(function (n) {
 			n.removeFromCorrectLayer();
 		});
 
-		Z_POSITION = SETTINGS.get_string('layout-position');
+		LAYER_SETTING = SETTINGS.get_string('layout-position');
+		this._layerId = (LAYER_SETTING == 'on-background')
+			? 'on-background'
+			: 'above-all'
+		;
 
 		this._allNotes.forEach(function (n) {
 			n.loadIntoCorrectLayer();
@@ -311,11 +353,16 @@ class NotesManager {
 			n.destroy();
 		});
 
-		if(this.USE_SHORTCUT) {
+		if(this._useKeyboardShortcut) {
 			Main.wm.removeKeybinding('notes-kb-shortcut');
 		}
 
 		this.panel_button.destroy();
+
+		if (this._timeout_id) {
+			Mainloop.source_remove(this._timeout_id);
+			this._timeout_id = null;
+		}
 	}
 };
 

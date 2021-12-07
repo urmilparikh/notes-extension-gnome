@@ -9,7 +9,6 @@ const GrabHelper = imports.ui.grabHelper;
 
 const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
-const Convenience = Me.imports.convenience;
 
 const Menus = Me.imports.menus;
 const Extension = Me.imports.extension;
@@ -127,7 +126,7 @@ var NoteBox = class NoteBox {
 
 		// Each note sets its own actor where it should be. This isn't a problem
 		// since the related setting isn't directly accessed, but is stored in
-		// 'Extension.Z_POSITION' instead, which prevent inconsistencies.
+		// 'Extension.NOTES_MANAGER' instead, which prevents inconsistencies.
 		this.loadIntoCorrectLayer();
 		this._setNotePosition();
 		this._loadText();
@@ -213,10 +212,21 @@ var NoteBox = class NoteBox {
 	}
 
 	_openDeleteDialog () {
+		let noteText = this.noteEntry.get_text();
+		// The text has to be truncated to avoid issues with long notes
+		let lines = noteText.split("\n")
+		if(lines.length > 10) {
+			noteText = lines[0] + "\n" + lines[1] + "\n" + lines[2] + "\n[...]\n";
+			noteText += lines[lines.length - 2] + "\n" + lines[lines.length - 1];
+		}
+		if(noteText === "") {
+			noteText = "[" + _("Empty note") + "]";
+		}
+
 		let description_label = new St.Label({
 			style: 'padding-top: 16px;',
 			x_align: Clutter.ActorAlign.CENTER,
-			text: "todo texte tronqué de la note",
+			text: noteText,
 		});
 
 		let dialog = new Dialog.CustomModalDialog(
@@ -229,7 +239,7 @@ var NoteBox = class NoteBox {
 	}
 
 	openEditTitleDialog () {
-		let title_entry = new St.Entry({
+		let titleEntry = new St.Entry({
 			can_focus: true,
 			track_hover: true,
 			x_expand: true,
@@ -238,7 +248,7 @@ var NoteBox = class NoteBox {
 
 		let dialog = new Dialog.CustomModalDialog(
 			_("Edit title"),
-			title_entry,
+			titleEntry,
 			_("Apply"),
 			this._applyTitleChange.bind(this)
 		);
@@ -258,7 +268,7 @@ var NoteBox = class NoteBox {
 	// "Public" methods called by NotesManager ---------------------------------
 
 	loadIntoCorrectLayer () {
-		if (Extension.Z_POSITION == 'above-all') {
+		if (Extension.NOTES_MANAGER.notesNeedChromeTracking()) {
 			Main.layoutManager.addChrome(this.actor, {
 				affectsInputRegion: true
 			});
@@ -268,7 +278,7 @@ var NoteBox = class NoteBox {
 	}
 
 	removeFromCorrectLayer () {
-		if (Extension.Z_POSITION == 'above-all') {
+		if (Extension.NOTES_MANAGER.notesNeedChromeTracking()) {
 //			Main.layoutManager.untrackChrome(this.actor);
 			Main.layoutManager.removeChrome(this.actor);
 		} else {
@@ -278,19 +288,19 @@ var NoteBox = class NoteBox {
 
 	show () {
 		this.actor.visible = true;
-		if (Extension.Z_POSITION == 'above-all') {
+		if (Extension.NOTES_MANAGER.notesNeedChromeTracking()) {
 			Main.layoutManager.trackChrome(this.actor);
 		}
 	}
 
 	onlyHide () {
 		this.actor.visible = false;
-		if (Extension.Z_POSITION == 'above-all') {
+		if (Extension.NOTES_MANAGER.notesNeedChromeTracking()) {
 			Main.layoutManager.untrackChrome(this.actor);
 		}
 	}
 
-	onlySave (withMetadata) {
+	onlySave (withMetadata=true) {
 		if(withMetadata) {
 			this._saveState();
 		}
@@ -317,7 +327,7 @@ var NoteBox = class NoteBox {
 	_applyTitleChange () {
 		// TODO
 		// ...
-		this.onlySave(true);
+		this.onlySave();
 	}
 
 	_applyActorStyle () {
@@ -360,7 +370,7 @@ var NoteBox = class NoteBox {
 
 	_redraw () {
 		this.actor.get_parent().set_child_above_sibling(this.actor, null);
-		this.onlySave(true);
+		this.onlySave();
 	}
 
 	//--------------------------------------------------------------------------
@@ -444,7 +454,7 @@ var NoteBox = class NoteBox {
 	_onRelease (actor, event) {
 		this._isResizing = false;
 		this._isMoving = false;
-		this.onlySave(true);
+		this.onlySave();
 	}
 
 	//--------------------------------------------------------------------------
@@ -455,7 +465,7 @@ var NoteBox = class NoteBox {
 			this._fontSize += delta;
 			this._applyNoteStyle();
 		}
-		this.onlySave(true);
+		this.onlySave();
 	}
 
 	/*
@@ -464,7 +474,7 @@ var NoteBox = class NoteBox {
 	 */
 	applyColorAndSave (r, g, b) {
 		this._applyColor(r, g, b)
-		this.onlySave(true);
+		this.onlySave();
 	}
 
 	//--------------------------------------------------------------------------

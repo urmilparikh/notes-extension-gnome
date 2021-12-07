@@ -10,13 +10,12 @@ const _ = Gettext.gettext;
 
 const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
-const Convenience = Me.imports.convenience;
 
 function init() {
-	Convenience.initTranslations();
+	ExtensionUtils.initTranslations();
 }
 
-let SETTINGS = Convenience.getSettings();
+let SETTINGS = ExtensionUtils.getSettings();
 
 //------------------------------------------------------------------------------
 
@@ -50,7 +49,7 @@ const NotesSettingsWidget = new GObject.Class({
 		// Position of the notes (layer)
 		let radioBtn1 = builder.get_object('radio1');
 		let radioBtn2 = builder.get_object('radio2');
-		// let radioBtn3 = builder.get_object('radio3');
+		let radioBtn3 = builder.get_object('radio3');
 		switch (SETTINGS.get_string('layout-position')) {
 			case 'above-all':
 				radioBtn1.set_active(true);
@@ -58,14 +57,14 @@ const NotesSettingsWidget = new GObject.Class({
 			case 'on-background':
 				radioBtn2.set_active(true);
 			break;
-			// case 'cycle-layers':
-			// 	radioBtn3.set_active(true);
-			// break;
+			case 'cycle-layers':
+				radioBtn3.set_active(true);
+			break;
 			default: break;
 		}
 		this._connectRadioBtn('above-all', radioBtn1);
 		this._connectRadioBtn('on-background', radioBtn2);
-		// this._connectRadioBtn('cycle-layers', radioBtn3);
+		this._connectRadioBtn('cycle-layers', radioBtn3);
 
 		//----------------------------------------------------------------------
 
